@@ -57,7 +57,7 @@ export default function App() {
 
   async function generateCardsForChunk(chunk: string, page = 0, idx = 0) {
     // Structured output expected by CARD_SCHEMA
-    // Cloud-fallback: if enabled and an API key is available, try OpenRouter first
+    // Cloud-fallback: if enabled and an API key is available, try OpenRouter via serverless proxy
     if (cloudFallback) {
       try {
         let apiKey = storedApiKey
@@ -67,14 +67,14 @@ export default function App() {
           if (apiKey) setStoredApiKey(apiKey)
         }
         if (apiKey) {
-          // dynamic import so app still loads if dependency isn't installed yet
-          // @ts-ignore
-          const OR: any = await import(/* @vite-ignore */ '@openrouter/sdk').catch(() => null)
-          const OpenRouter = OR?.OpenRouter || OR?.default?.OpenRouter || OR?.default
-          if (OpenRouter) {
-            const client = new OpenRouter({ apiKey })
+          try {
             const modelName = medMode ? 'openai/gpt-5.2' : 'openai/gpt-5.2'
-            const completion = await client.chat.send({ model: modelName, messages: [{ role: 'user', content: medMode ? `You are a top medical tutor. From this exact text, generate JSON array of flashcards {front, back, tags}: """${chunk}"""` : `Extract concise flashcards from the text and return a JSON array of {front, back, tags}:\n\n${chunk}` }], stream: false })
+            const resp = await fetch('/api/openrouter', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ model: modelName, messages: [{ role: 'user', content: medMode ? `You are a top medical tutor. From this exact text, generate JSON array of flashcards {front, back, tags}: """${chunk}"""` : `Extract concise flashcards from the text and return a JSON array of {front, back, tags}:\n\n${chunk}` }], stream: false, apiKey })
+            })
+            const completion = await resp.json()
             const text = completion?.choices?.[0]?.message?.content || completion?.output || ''
             try {
               const parsed = JSON.parse(text)
@@ -88,6 +88,8 @@ export default function App() {
             } catch (e) {
               // not JSON — fall through to local model/fallback
             }
+          } catch (e) {
+            console.warn('cloud fallback request failed, continuing locally', e)
           }
         }
       } catch (e) {
