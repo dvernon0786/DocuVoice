@@ -1,0 +1,64 @@
+# Project Overview: docucards
+
+# DocuCards
+
+**Scanned:** 2026-03-20T07:43:13.744Z
+
+## Tech Stack
+
+**Dependencies:**
+
+- @openrouter/sdk@^0.9.11
+- @tailwindcss/vite@^4.2.2
+- lucide-react@^0.577.0
+- pdfjs-dist@^3.7.107
+- react@^18.2.0
+- react-dom@^18.2.0
+- tesseract.js@^4.1.1
+- ts-fsrs@^5.3.1
+- vite-plugin-pwa@^1.2.0
+- vite-plugin-static-copy@^3.3.0
+
+
+**Dev Dependencies:**
+
+- @types/react@^18.0.0
+- @types/react-dom@^18.0.0
+- @vitejs/plugin-react@^4.0.0
+- autoprefixer@^10.4.0
+- eslint@^10.0.3
+- postcss@^8.4.0
+- rollup@^4.59.0
+- tailwindcss@^3.4.0
+- typescript@^5.2.0
+- vite@^5.4.21
+
+
+## Top-level folders
+
+- .git
+- .github
+- _bmad
+- api
+- bmad-method
+- design-artifacts
+- dev-dist
+- dist
+- docs
+- scripts
+- src
+
+## Top-level files
+
+- .gitignore
+- README.md
+- eslint.config.cjs
+- index.html
+- package-lock.json
+- package.json
+- postcss.config.cjs
+- tailwind.config.js
+- tsconfig.json
+- vite.config.ts
+
+**Total files (approx):** 5229

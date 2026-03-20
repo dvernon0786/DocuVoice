@@ -17,7 +17,7 @@ export default async function handler(req, res) {
         req.on('error', reject)
       })
       body = raw ? JSON.parse(raw) : {}
-    } catch (e) {
+    } catch {
       return res.status(400).json({ error: 'Invalid JSON body' })
     }
   }
