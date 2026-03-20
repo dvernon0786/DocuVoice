@@ -57,6 +57,44 @@ export default function App() {
 
   async function generateCardsForChunk(chunk: string, page = 0, idx = 0) {
     // Structured output expected by CARD_SCHEMA
+    // Cloud-fallback: if enabled and an API key is available, try OpenRouter first
+    if (cloudFallback) {
+      try {
+        let apiKey = storedApiKey
+        if (!apiKey && keyPassphrase) {
+          const res = await decryptFromLocalStorage('cloud_api_key', keyPassphrase)
+          apiKey = res?.key ?? null
+          if (apiKey) setStoredApiKey(apiKey)
+        }
+        if (apiKey) {
+          // dynamic import so app still loads if dependency isn't installed yet
+          // @ts-ignore
+          const OR: any = await import(/* @vite-ignore */ '@openrouter/sdk').catch(() => null)
+          const OpenRouter = OR?.OpenRouter || OR?.default?.OpenRouter || OR?.default
+          if (OpenRouter) {
+            const client = new OpenRouter({ apiKey })
+            const modelName = medMode ? 'openai/gpt-5.2' : 'openai/gpt-5.2'
+            const completion = await client.chat.send({ model: modelName, messages: [{ role: 'user', content: medMode ? `You are a top medical tutor. From this exact text, generate JSON array of flashcards {front, back, tags}: """${chunk}"""` : `Extract concise flashcards from the text and return a JSON array of {front, back, tags}:\n\n${chunk}` }], stream: false })
+            const text = completion?.choices?.[0]?.message?.content || completion?.output || ''
+            try {
+              const parsed = JSON.parse(text)
+              const out: Card[] = parsed.map((c: any, i: number) => ({
+                front: c.front || `Q: ${i}`,
+                back: c.back || '',
+                tags: c.tags || [],
+                meta: { sourcePage: page, chunkIndex: idx }
+              }))
+              return out
+            } catch (e) {
+              // not JSON — fall through to local model/fallback
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('cloud fallback failed, continuing locally', e)
+      }
+    }
+
     // Try to use local WebLLM if available, otherwise fallback to a simple heuristic
     try {
       // dynamic import so app still loads if dependency isn't installed yet
@@ -118,6 +156,11 @@ export default function App() {
   const [keyPassphrase, setKeyPassphrase] = useState<string>('')
   const [apiKeyInput, setApiKeyInput] = useState<string>('')
   const [storedApiKey, setStoredApiKey] = useState<string | null>(null)
+  const [cloudFallback, setCloudFallback] = useState<boolean>(() => {
+    try { return localStorage.getItem('cloudFallback') === '1' } catch { return false }
+  })
+
+  useEffect(() => { try { localStorage.setItem('cloudFallback', cloudFallback ? '1' : '0') } catch {} }, [cloudFallback])
 
   async function saveCloudKey() {
     if (!keyPassphrase || !apiKeyInput) return
@@ -232,6 +275,10 @@ export default function App() {
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={medMode} onChange={(e) => setMedMode(e.target.checked)} className="accent-blue-500" />
             <span>Med Mode</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={cloudFallback} onChange={(e) => setCloudFallback(e.target.checked)} className="accent-indigo-400" />
+            <span>Enable Cloud Fallback</span>
           </label>
         </div>
 
