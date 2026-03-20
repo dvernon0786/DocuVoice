@@ -51,10 +51,14 @@ export default function App() {
     // Try to use local WebLLM if available, otherwise fallback to a simple heuristic
     try {
       // dynamic import so app still loads if dependency isn't installed yet
+      const pkgName = '@mlc-ai/web-llm'
+      // prevent Vite from pre-bundling this optional dependency
       // @ts-ignore
-      const WebLLM = (await import('@mlc-ai/web-llm')).WebLLM
+      const WebLLMMod: any = await import(/* @vite-ignore */ pkgName).catch(() => null)
+      // @ts-ignore
+      const WebLLM = WebLLMMod?.WebLLM
       // @ts-ignore (simplified usage — replace with actual WebLLM init & call)
-      const model = await WebLLM.load?.()
+      const model = await WebLLM?.load?.()
       const prompt = `Extract 3 concise flashcards from the following text. Return JSON array of {front, back, tags}:\n\n${chunk}`
       // @ts-ignore
       const result = await model?.generate?.(prompt)
@@ -111,7 +115,9 @@ export default function App() {
     // Use ts-fsrs to repeat/update schedule
     try {
       // Try dynamic import of `ts-fsrs` so the app still runs if it's not installed.
-      const mod: any = await import('ts-fsrs').catch(() => null)
+      const fsrsPkg = 'ts-fsrs'
+      // prevent Vite from pre-bundling
+      const mod: any = await import(/* @vite-ignore */ fsrsPkg).catch(() => null)
       if (mod && typeof mod.repeat === 'function') {
         const res = await mod.repeat({ card, rating })
         console.log('FSRS repeat result:', res)
