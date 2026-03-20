@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react'
+import React, { useState, useRef } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import PDFPageViewer from './PDFPageViewer'
 import PDFReadAloud from './PDFReadAloud'
@@ -10,12 +10,13 @@ import { generateCards } from '../lib/pipeline'
 import { decryptFromLocalStorage } from '../lib/secureStorage'
 
 type StagedCard = Omit<Card, 'id' | 'stability' | 'difficulty' | 'elapsedDays' | 'scheduledDays' | 'reps' | 'lapses' | 'state' | 'createdAt'>
+ 
 
 type Props = {
   onDone: () => void
 }
 
-type Phase = 'pick' | 'viewer' | 'staging' | 'saving'
+type Phase = 'pick' | 'viewer' | 'staging'
 
 export default function ImportFlow({ onDone }: Props) {
   const [phase, setPhase] = useState<Phase>('pick')
@@ -31,18 +32,11 @@ export default function ImportFlow({ onDone }: Props) {
   const medMode = localStorage.getItem('medMode') === '1'
   const cloudEnabled = localStorage.getItem('cloudFallback') === '1'
 
-  async function getApiKey(): Promise<string | null> {
+  // BUG FIX: Read decrypted key from sessionStorage (set by Settings after unlock)
+  // Falls back to null gracefully — pipeline uses heuristic
+  function getApiKey(): string | null {
     if (!cloudEnabled) return null
-    try {
-      // try to load without passphrase prompt first (already in memory via Settings)
-      const stored = localStorage.getItem('cloud_api_key')
-      if (!stored) return null
-      // We don't have passphrase here — user needs to have loaded key via Settings
-      // Return null; generateCards will skip cloud gracefully
-      return null
-    } catch {
-      return null
-    }
+    return sessionStorage.getItem('decrypted_api_key') ?? null
   }
 
   function onFileSelect(f: File) {
@@ -60,10 +54,14 @@ export default function ImportFlow({ onDone }: Props) {
   async function handleRegionExtract(text: string, pageIndex: number) {
     if (!text.trim()) return
     setStatus(`Generating cards from page ${pageIndex}…`)
-    const apiKey = await getApiKey()
-    const cards = await generateCards(text, 0, pageIndex, 0, medMode, apiKey)
-    setStaged(prev => [...prev, ...cards])
-    setStatus(`${staged.length + cards.length} cards staged`)
+    const apiKey = getApiKey()
+    const newCards = await generateCards(text, 0, pageIndex, 0, medMode, apiKey)
+    // BUG FIX: use functional update to avoid stale staged.length
+    setStaged(prev => {
+      const next = [...prev, ...newCards]
+      setStatus(`${next.length} card${next.length !== 1 ? 's' : ''} staged`)
+      return next
+    })
     if (phase === 'viewer') setPhase('staging')
   }
 
@@ -107,7 +105,7 @@ export default function ImportFlow({ onDone }: Props) {
     setEditorIdx(null)
   }
 
-  // ── Pick phase ─────────────────────────────────────────────────────────
+  // ── Pick phase ──────────────────────────────────────────────────────────
 
   if (phase === 'pick') return (
     <div className="import-flow">
@@ -136,23 +134,14 @@ export default function ImportFlow({ onDone }: Props) {
       </div>
 
       <div className="import-tips">
-        <div className="tip">
-          <span className="tip-icon">⬡</span>
-          <span>Lecture notes, textbook chapters, question banks</span>
-        </div>
-        <div className="tip">
-          <span className="tip-icon">⬡</span>
-          <span>Scanned PDFs supported via OCR (Tesseract)</span>
-        </div>
-        <div className="tip">
-          <span className="tip-icon">⬡</span>
-          <span>Select regions on each page to generate cards</span>
-        </div>
+        <div className="tip"><span className="tip-icon">⬡</span><span>Lecture notes, textbook chapters, question banks</span></div>
+        <div className="tip"><span className="tip-icon">⬡</span><span>Scanned PDFs supported via OCR (Tesseract)</span></div>
+        <div className="tip"><span className="tip-icon">⬡</span><span>Select regions on each page to generate cards</span></div>
       </div>
     </div>
   )
 
-  // ── Viewer phase ──────────────────────────────────────────────────────
+  // ── Viewer phase ────────────────────────────────────────────────────────
 
   if (phase === 'viewer') return (
     <div className="import-flow">
@@ -166,19 +155,16 @@ export default function ImportFlow({ onDone }: Props) {
         )}
       </div>
       {status && <div className="status-bar">{status}</div>}
-
-      {/* PDF Read Aloud */}
       <div className="viewer-tts-panel">
         <div className="viewer-tts-label">🔊 Read aloud this PDF</div>
         <PDFReadAloud file={file} />
       </div>
-
       <p className="viewer-hint">Draw rectangles on pages to select content → cards generated instantly</p>
       <PDFPageViewer file={file} onRegionExtract={handleRegionExtract} />
     </div>
   )
 
-  // ── Staging phase ─────────────────────────────────────────────────────
+  // ── Staging phase ───────────────────────────────────────────────────────
 
   return (
     <div className="import-flow">
@@ -224,7 +210,7 @@ export default function ImportFlow({ onDone }: Props) {
                 </div>
               )}
               <div className="staged-tts">
-                <TTSPlayer text={`${c.front}. ${c.back}`} compact label="Read card" />
+                <TTSPlayer text={`${c.front}. ${c.back}`} compact />
               </div>
             </div>
             <div className="staged-actions">

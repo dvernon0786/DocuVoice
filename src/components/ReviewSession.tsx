@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { getDueCards, putCard, updateDeckCounts } from '../lib/db'
 import type { Card } from '../lib/db'
 import { scheduleCard, intervalLabel } from '../lib/fsrs'
@@ -20,10 +20,14 @@ export default function ReviewSession({ deckId, deckName, onDone }: Props) {
   const [loading, setLoading] = useState(true)
   const [autoRead, setAutoRead] = useState(() => localStorage.getItem('autoReadAloud') === '1')
 
+  // BUG FIX: use refs to get current values inside keyboard handler without stale closure
+  const revealedRef = useRef(revealed)
+  const currentRef = useRef(current)
+  const rateRef = useRef<(r: Rating) => void>(() => {})
+
   const loadQueue = useCallback(async () => {
     setLoading(true)
     const due = await getDueCards(deckId)
-    // shuffle new cards to the front
     const newCards = due.filter(c => c.state === 'new')
     const reviewCards = due.filter(c => c.state !== 'new')
     const shuffled = [...newCards.sort(() => Math.random() - 0.5), ...reviewCards]
@@ -35,47 +39,58 @@ export default function ReviewSession({ deckId, deckName, onDone }: Props) {
 
   useEffect(() => { loadQueue() }, [loadQueue])
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === ' ' || e.key === 'Enter') {
-        e.preventDefault()
-        if (!revealed && current) setRevealed(true)
-      }
-      if (revealed && current) {
-        if (e.key === '1') rate(1)
-        if (e.key === '2') rate(2)
-        if (e.key === '3') rate(3)
-        if (e.key === '4') rate(4)
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [revealed, current])
+  // Keep refs in sync
+  useEffect(() => { revealedRef.current = revealed }, [revealed])
+  useEffect(() => { currentRef.current = current }, [current])
 
-  async function rate(rating: Rating) {
-    if (!current) return
-    const result = scheduleCard(current, rating)
+  async function rate(r: Rating) {
+    if (!currentRef.current) return
+    const card = currentRef.current
+    const result = scheduleCard(card, r)
     await putCard(result.card)
     await updateDeckCounts(deckId)
 
     setSessionStats(s => ({
       reviewed: s.reviewed + 1,
-      again: s.again + (rating === 1 ? 1 : 0),
+      again: s.again + (r === 1 ? 1 : 0),
     }))
 
-    const remaining = queue.slice(1)
-    // if Again, push back at position 3 (or end)
-    if (rating === 1) {
-      const pos = Math.min(3, remaining.length)
-      remaining.splice(pos, 0, result.card)
-    }
-
-    setQueue(remaining)
-    setCurrent(remaining[0] ?? null)
+    setQueue(prev => {
+      const remaining = prev.slice(1)
+      if (r === 1) {
+        const pos = Math.min(3, remaining.length)
+        remaining.splice(pos, 0, result.card)
+      }
+      const next = remaining[0] ?? null
+      setCurrent(next)
+      if (remaining.length === 0) setDone(true)
+      return remaining
+    })
     setRevealed(false)
-    if (remaining.length === 0) setDone(true)
   }
+
+  // Keep rateRef current
+  useEffect(() => { rateRef.current = rate }, [queue, deckId])
+
+  // BUG FIX: keyboard handler uses refs — no stale closure
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault()
+        if (!revealedRef.current && currentRef.current) setRevealed(true)
+      }
+      if (revealedRef.current && currentRef.current) {
+        if (e.key === '1') rateRef.current(1)
+        if (e.key === '2') rateRef.current(2)
+        if (e.key === '3') rateRef.current(3)
+        if (e.key === '4') rateRef.current(4)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, []) // stable — uses refs
 
   if (loading) return (
     <div className="review-loading">
@@ -103,9 +118,9 @@ export default function ReviewSession({ deckId, deckName, onDone }: Props) {
 
   if (!current) return null
 
-  const progress = queue.length > 0
-    ? Math.round((sessionStats.reviewed / (sessionStats.reviewed + queue.length)) * 100)
-    : 100
+  // BUG FIX: safe progress — never divides by zero
+  const total = sessionStats.reviewed + queue.length
+  const progress = total > 0 ? Math.round((sessionStats.reviewed / total) * 100) : 0
 
   return (
     <div className="review-session">
@@ -163,8 +178,8 @@ export default function ReviewSession({ deckId, deckName, onDone }: Props) {
           <div className="rating-row">
             {([1, 2, 3, 4] as Rating[]).map(r => {
               const preview = scheduleCard(current, r)
-              const labels = { 1: 'Again', 2: 'Hard', 3: 'Good', 4: 'Easy' }
-              const colors = { 1: 'btn-again', 2: 'btn-hard', 3: 'btn-good', 4: 'btn-easy' }
+              const labels: Record<number,string> = { 1: 'Again', 2: 'Hard', 3: 'Good', 4: 'Easy' }
+              const colors: Record<number,string> = { 1: 'btn-again', 2: 'btn-hard', 3: 'btn-good', 4: 'btn-easy' }
               return (
                 <button key={r} className={`btn-rating ${colors[r]}`} onClick={() => rate(r)}>
                   <span className="rating-label">{labels[r]}</span>
@@ -179,3 +194,4 @@ export default function ReviewSession({ deckId, deckName, onDone }: Props) {
     </div>
   )
 }
+
