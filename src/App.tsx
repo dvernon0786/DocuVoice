@@ -4,6 +4,7 @@ import Tesseract from 'tesseract.js'
 import { addCard as dbAddCard, getAllCards as dbGetAllCards, deleteCard as dbDeleteCard } from './lib/db'
 import CardEditor from './components/CardEditor'
 import PDFPageViewer from './components/PDFPageViewer'
+import { encryptToLocalStorage, decryptFromLocalStorage, removeItemEncrypted } from './lib/secureStorage'
 
 export const CARD_SCHEMA = {
   front: 'string',
@@ -113,6 +114,37 @@ export default function App() {
   // selected file for per-page viewer
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
 
+  // secure cloud key UI state
+  const [keyPassphrase, setKeyPassphrase] = useState<string>('')
+  const [apiKeyInput, setApiKeyInput] = useState<string>('')
+  const [storedApiKey, setStoredApiKey] = useState<string | null>(null)
+
+  async function saveCloudKey() {
+    if (!keyPassphrase || !apiKeyInput) return
+    try {
+      await encryptToLocalStorage('cloud_api_key', { key: apiKeyInput }, keyPassphrase)
+      setApiKeyInput('')
+      setStoredApiKey('saved')
+    } catch (e) {
+      console.error('save key failed', e)
+    }
+  }
+
+  async function loadCloudKey() {
+    if (!keyPassphrase) return
+    try {
+      const res = await decryptFromLocalStorage('cloud_api_key', keyPassphrase)
+      setStoredApiKey(res?.key ?? null)
+    } catch (e) {
+      console.error('load key failed', e)
+    }
+  }
+
+  function clearCloudKey() {
+    removeItemEncrypted('cloud_api_key')
+    setStoredApiKey(null)
+  }
+
   async function handleRegionExtract(text: string, pageIndex: number) {
     if (!text || !text.trim()) return
     setStatus('generating')
@@ -196,6 +228,24 @@ export default function App() {
       <div className="mb-4">
         <input type="file" accept="application/pdf" onChange={onFile} />
         <div className="mt-2">Status: {status}</div>
+        <div className="mt-3 flex items-center gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={medMode} onChange={(e) => setMedMode(e.target.checked)} className="accent-blue-500" />
+            <span>Med Mode</span>
+          </label>
+        </div>
+
+        <div className="mt-3 p-3 bg-slate-800 rounded">
+          <div className="text-sm text-slate-300 mb-2">Encrypted cloud key (stored locally)</div>
+          <div className="flex gap-2">
+            <input placeholder="passphrase" type="password" value={keyPassphrase} onChange={(e) => setKeyPassphrase(e.target.value)} className="px-2 py-1 rounded bg-slate-700" />
+            <input placeholder="API key" value={apiKeyInput} onChange={(e) => setApiKeyInput(e.target.value)} className="px-2 py-1 rounded bg-slate-700" />
+            <button className="px-2 py-1 bg-green-600 rounded" onClick={saveCloudKey}>Save</button>
+            <button className="px-2 py-1 bg-blue-600 rounded" onClick={loadCloudKey}>Load</button>
+            <button className="px-2 py-1 bg-red-600 rounded" onClick={clearCloudKey}>Clear</button>
+          </div>
+          <div className="text-xs text-slate-400 mt-2">Stored: {storedApiKey ? 'exists' : 'none'}</div>
+        </div>
       </div>
 
       {selectedFile && (
