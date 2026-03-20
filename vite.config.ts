@@ -49,8 +49,10 @@ export default defineConfig(async () => {
     plugins,
     build: {
       rollupOptions: {
-        external: ['@mlc-ai/web-llm']
-      }
+        external: ['@mlc-ai/web-llm', '@elevenlabs/piper', 'piper', '@piper/tts']
+      },
+      // increase chunk warning limit to reduce noisy warnings for large ML assets
+      chunkSizeWarningLimit: 700000
     }
   }
 })
