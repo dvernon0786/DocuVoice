@@ -12,7 +12,7 @@ type Props = {
 export default function TTSPlayer({ text, compact = false, label, highlightText = false }: Props) {
   const [ttsState, setTtsState] = useState<TTSState>('idle')
   const [charIndex, setCharIndex] = useState<number>(-1)
-  const voiceId = localStorage.getItem('ttsVoice') ?? 'browser-default'
+
 
   useEffect(() => {
     const unsub = ttsEngine.onStateChange((s) => {
@@ -28,7 +28,7 @@ export default function TTSPlayer({ text, compact = false, label, highlightText 
     } else if (ttsState === 'paused') {
       ttsEngine.resume()
     } else {
-      ttsEngine.setVoice(voiceId)
+      ttsEngine.setVoice(localStorage.getItem("ttsVoice") ?? "browser-default")
       ttsEngine.speak(text, highlightText ? (ci) => setCharIndex(ci) : undefined)
     }
   }
@@ -83,4 +83,5 @@ export default function TTSPlayer({ text, compact = false, label, highlightText 
     </div>
   )
 }
+ 
 

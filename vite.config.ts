@@ -4,55 +4,61 @@ import react from '@vitejs/plugin-react'
 export default defineConfig(async () => {
   const plugins: any[] = [react()]
 
-  // Try to load optional plugins if installed. This keeps the dev server
-  // working even when the packages are not yet installed.
-  try {
-    // vite-plugin-static-copy (ESM default)
-    // @ts-ignore
-    const staticCopy = await import('vite-plugin-static-copy')
-    if (staticCopy && staticCopy.default) {
-      plugins.push(staticCopy.default({
-        targets: [
-          { src: 'node_modules/@mlc-ai/web-llm/dist/*', dest: 'webllm' }
-        ]
-      }))
-    }
-  } catch (e) {
-    // plugin not installed — ignore
-  }
-
+  // vite-plugin-pwa (optional — graceful if not installed)
   try {
     const pwa = await import('vite-plugin-pwa')
-    if (pwa && pwa.VitePWA) {
+    if (pwa?.VitePWA) {
       plugins.push(pwa.VitePWA({
         registerType: 'autoUpdate',
         devOptions: { enabled: true },
+        workbox: {
+          maximumFileSizeToCacheInBytes: 5 * 1024 * 1024, // 5MB
+          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        },
         manifest: {
-          name: 'DocuCards',
-          short_name: 'DocuCards',
+          name: 'MedCards',
+          short_name: 'MedCards',
           description: 'Offline PDF → Smart Flashcards with OCR & FSRS',
-          theme_color: '#3b82f6',
-          background_color: '#0f172a',
+          theme_color: '#3b7cf8',
+          background_color: '#080c14',
           display: 'standalone',
           icons: [
             { src: '/icon-192.png', sizes: '192x192', type: 'image/png' },
-            { src: '/icon-512.png', sizes: '512x512', type: 'image/png' }
-          ]
-        }
+            { src: '/icon-512.png', sizes: '512x512', type: 'image/png' },
+          ],
+        },
       }))
     }
-  } catch (e) {
-    // plugin not installed — ignore
+  } catch {
+    // plugin not installed — skip
   }
 
   return {
     plugins,
     build: {
+      // Raise chunk warning limit — pdf.js and tesseract are inherently large
+      chunkSizeWarningLimit: 4000,
       rollupOptions: {
-        external: ['@mlc-ai/web-llm', '@elevenlabs/piper', 'piper', '@piper/tts']
+        // Mark heavy optional deps as external — loaded at runtime via CDN / window globals
+        // Users who want WebLLM or Piper can load them via <script> in index.html
+        external: [
+          '@mlc-ai/web-llm',
+          'piper-tts-web',
+        ],
+        output: {
+          // Manual chunking to avoid one giant bundle
+          manualChunks: {
+            'pdfjs':     ['pdfjs-dist'],
+            'tesseract': ['tesseract.js'],
+            'react':     ['react', 'react-dom'],
+            'fsrs':      ['ts-fsrs'],
+          },
+        },
       },
-      // increase chunk warning limit to reduce noisy warnings for large ML assets
-      chunkSizeWarningLimit: 700000
-    }
+    },
+    optimizeDeps: {
+      // Don't pre-bundle these — they're either external or loaded dynamically
+      exclude: ['@mlc-ai/web-llm', 'piper-tts-web'],
+    },
   }
 })
