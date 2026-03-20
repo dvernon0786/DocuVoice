@@ -1,355 +1,101 @@
 import React, { useState, useEffect } from 'react'
+import DeckList from './components/DeckList'
+import ImportFlow from './components/ImportFlow'
+import ReviewSession from './components/ReviewSession'
+import Settings from './components/Settings'
+import ChatPage from './components/ChatPage'
+// Minimal Deck type used by this UI
+type Deck = { id?: number; name: string }
+import { decryptFromLocalStorage } from './lib/secureStorage'
+
+// Set pdf.js worker
 import * as pdfjsLib from 'pdfjs-dist'
-import Tesseract from 'tesseract.js'
-import { addCard as dbAddCard, getAllCards as dbGetAllCards, deleteCard as dbDeleteCard } from './lib/db'
-import CardEditor from './components/CardEditor'
-import PDFPageViewer from './components/PDFPageViewer'
-import { encryptToLocalStorage, decryptFromLocalStorage, removeItemEncrypted } from './lib/secureStorage'
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
 
-export const CARD_SCHEMA = {
-  front: 'string',
-  back: 'string',
-  tags: 'string[]',
-  meta: { sourcePage: 'number', chunkIndex: 'number' }
-}
-
-type Card = {
-  front: string
-  back: string
-  tags?: string[]
-  meta?: { sourcePage?: number; chunkIndex?: number }
-}
+type View = 'home' | 'import' | 'review' | 'chat'
 
 export default function App() {
-  const [cards, setCards] = useState<Card[]>([])
-  const [status, setStatus] = useState<string>('idle')
-  const [medMode, setMedMode] = useState<boolean>(() => {
-    try { return localStorage.getItem('medMode') === '1' } catch { return false }
-  })
+  const [view, setView] = useState<View>('home')
+  const [activeDeck, setActiveDeck] = useState<Deck | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [deckRefreshKey, setDeckRefreshKey] = useState(0)
+  const [chatApiKey, setChatApiKey] = useState<string | null>(null)
 
-  useEffect(() => { try { localStorage.setItem('medMode', medMode ? '1' : '0') } catch {} }, [medMode])
-
-  async function processPDF(file: File) {
-    setStatus('processing')
-    const arrayBuffer = await file.arrayBuffer()
-    try {
-      const loadingTask: any = pdfjsLib.getDocument({ data: arrayBuffer })
-      const doc = await loadingTask.promise
-      const textPages: string[] = []
-      for (let i = 1; i <= doc.numPages; i++) {
-        const page = await doc.getPage(i)
-        const content = await page.getTextContent()
-        const strings = content.items.map((it: any) => it.str)
-        const pageText = strings.join(' ')
-        textPages.push(pageText)
-      }
-      setStatus('extracted')
-      return textPages
-    } catch (err) {
-      // OCR fallback using Tesseract (scanned PDFs)
-      setStatus('ocr-fallback')
-      // NOTE: In a real app you'd render each page to canvas and OCR it.
-      // Here we'll run OCR on the whole file as a simple fallback.
-      const { data } = await Tesseract.recognize(await file.arrayBuffer(), 'eng+hin+kan')
-      return [data.text]
-    }
-  }
-
-  async function generateCardsForChunk(chunk: string, page = 0, idx = 0) {
-    // Structured output expected by CARD_SCHEMA
-    // Cloud-fallback: if enabled and an API key is available, try OpenRouter via serverless proxy
-    if (cloudFallback) {
-      try {
-        let apiKey = storedApiKey
-        if (!apiKey && keyPassphrase) {
-          const res = await decryptFromLocalStorage('cloud_api_key', keyPassphrase)
-          apiKey = res?.key ?? null
-          if (apiKey) setStoredApiKey(apiKey)
-        }
-        if (apiKey) {
-          try {
-            const modelName = medMode ? 'openai/gpt-5.2' : 'openai/gpt-5.2'
-            const resp = await fetch('/api/openrouter', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ model: modelName, messages: [{ role: 'user', content: medMode ? `You are a top medical tutor. From this exact text, generate JSON array of flashcards {front, back, tags}: """${chunk}"""` : `Extract concise flashcards from the text and return a JSON array of {front, back, tags}:\n\n${chunk}` }], stream: false, apiKey })
-            })
-            const completion = await resp.json()
-            const text = completion?.choices?.[0]?.message?.content || completion?.output || ''
-            try {
-              const parsed = JSON.parse(text)
-              const out: Card[] = parsed.map((c: any, i: number) => ({
-                front: c.front || `Q: ${i}`,
-                back: c.back || '',
-                tags: c.tags || [],
-                meta: { sourcePage: page, chunkIndex: idx }
-              }))
-              return out
-            } catch (e) {
-              // not JSON — fall through to local model/fallback
-            }
-          } catch (e) {
-            console.warn('cloud fallback request failed, continuing locally', e)
-          }
-        }
-      } catch (e) {
-        console.warn('cloud fallback failed, continuing locally', e)
-      }
-    }
-
-    // Try to use local WebLLM if available, otherwise fallback to a simple heuristic
-    try {
-      // dynamic import so app still loads if dependency isn't installed yet
-      const pkgName = '@mlc-ai/web-llm'
-      // prevent Vite from pre-bundling this optional dependency
-      // @ts-ignore
-      const WebLLMMod: any = await import(/* @vite-ignore */ pkgName).catch(() => null)
-      // @ts-ignore
-      const WebLLM = WebLLMMod?.WebLLM
-      // @ts-ignore (simplified usage — replace with actual WebLLM init & call)
-      const model = await WebLLM?.load?.()
-        const prompt = medMode
-          ? `You are a top medical tutor for NEET-PG / USMLE. From this exact textbook/lecture chunk only, generate 4 high-yield flashcards. Return strict JSON array of objects with keys {front, back, tags}. Prioritize: one fact per card, cloze deletions for lists/tables, clinical vignettes, mechanisms, differentials, and common drug side-effects. Tags should include specialties when relevant (e.g. "pharmacology","cardiology","anatomy","high-yield"). Text: """${chunk}"""`
-          : `Extract 3 concise flashcards from the following text. Return JSON array of {front, back, tags}:\n\n${chunk}`
-      // @ts-ignore
-      const result = await model?.generate?.(prompt)
-      if (result) {
-        // Expecting JSON — parse safely
-        try {
-          const parsed = JSON.parse(result)
-          const out: Card[] = parsed.map((c: any, i: number) => ({
-            front: c.front || `Q: ${i}`,
-            back: c.back || '',
-            tags: c.tags || [],
-            meta: { sourcePage: page, chunkIndex: idx }
-          }))
-          return out
-        } catch (e) {
-          // fallthrough to heuristic
-        }
-      }
-    } catch (e) {
-      // model not available — fallback
-    }
-
-    // Simple heuristic fallback: split into sentences and make Q/A
-    const sentences = chunk.split(/(?<=[.?!])\s+/).filter(Boolean)
-    const take = medMode ? 4 : 3
-    const sample = sentences.slice(0, take).map((s, i) => ({
-      front: medMode ? `Cloze: ${s.slice(0, Math.min(60, s.length))}${s.length>60?'...':''}` : s.slice(0, 80) + (s.length > 80 ? '...' : ''),
-      back: s,
-      tags: medMode ? ['medical','high-yield'] : [],
-      meta: { sourcePage: page, chunkIndex: idx }
-    }))
-    return sample
-  }
-
-  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-    // instead of auto-processing, show per-page viewer so user can select regions
-    setSelectedFile(file)
-  }
-
-  // selected file for per-page viewer
-  const [selectedFile, setSelectedFile] = useState<File | null>(null)
-
-  // secure cloud key UI state
-  const [keyPassphrase, setKeyPassphrase] = useState<string>('')
-  const [apiKeyInput, setApiKeyInput] = useState<string>('')
-  const [storedApiKey, setStoredApiKey] = useState<string | null>(null)
-  const [cloudFallback, setCloudFallback] = useState<boolean>(() => {
-    try { return localStorage.getItem('cloudFallback') === '1' } catch { return false }
-  })
-
-  useEffect(() => { try { localStorage.setItem('cloudFallback', cloudFallback ? '1' : '0') } catch {} }, [cloudFallback])
-
-  async function saveCloudKey() {
-    if (!keyPassphrase || !apiKeyInput) return
-    try {
-      await encryptToLocalStorage('cloud_api_key', { key: apiKeyInput }, keyPassphrase)
-      setApiKeyInput('')
-      setStoredApiKey('saved')
-    } catch (e) {
-      console.error('save key failed', e)
-    }
-  }
-
-  async function loadCloudKey() {
-    if (!keyPassphrase) return
-    try {
-      const res = await decryptFromLocalStorage('cloud_api_key', keyPassphrase)
-      setStoredApiKey(res?.key ?? null)
-    } catch (e) {
-      console.error('load key failed', e)
-    }
-  }
-
-  function clearCloudKey() {
-    removeItemEncrypted('cloud_api_key')
-    setStoredApiKey(null)
-  }
-
-  async function handleRegionExtract(text: string, pageIndex: number) {
-    if (!text || !text.trim()) return
-    setStatus('generating')
-    // chunk the extracted region and create cards
-    const out = await generateCardsForChunk(text, pageIndex, 0)
-    setCards((prev) => [...prev, ...out])
-    setStatus('done')
-  }
-
-  // Stored cards from IndexedDB
-  const [storedCards, setStoredCards] = useState<any[]>([])
+  // Try to pre-load API key if cloud is enabled (no passphrase = deferred to chat page)
+  const cloudEnabled = localStorage.getItem('cloudFallback') === '1'
 
   useEffect(() => {
-    (async () => {
+    let mounted = true
+    async function preloadKey() {
+      if (!cloudEnabled) return
       try {
-        const all = await dbGetAllCards()
-        setStoredCards(all as any[])
-      } catch (e) {
-        // ignore
+        // decryptFromLocalStorage requires a passphrase; empty string will return null if key is encrypted
+        const key = await decryptFromLocalStorage('chatApiKey', '')
+        if (mounted && key) setChatApiKey(key)
+      } catch (err) {
+        // ignore — ChatPage will handle prompting for key/passphrase if needed
       }
-    })()
-  }, [])
-
-  async function saveToDB(card: Card) {
-    try {
-      await dbAddCard(card)
-      const all = await dbGetAllCards()
-      setStoredCards(all as any[])
-      console.log('saved to db')
-    } catch (e) {
-      console.error('save error', e)
     }
+    preloadKey()
+    return () => { mounted = false }
+  }, [cloudEnabled])
+
+  function goHome() {
+    setView('home')
+    setActiveDeck(null)
+    setDeckRefreshKey(k => k + 1)
   }
 
-  async function removeFromDB(id: number) {
-    try {
-      await dbDeleteCard(id)
-      const all = await dbGetAllCards()
-      setStoredCards(all as any[])
-    } catch (e) {
-      console.error('delete error', e)
-    }
-  }
-
-  async function reviewCard(card: Card, rating: number) {
-    // Use ts-fsrs to repeat/update schedule
-    try {
-      // Try dynamic import of `ts-fsrs` so the app still runs if it's not installed.
-      const fsrsPkg = 'ts-fsrs'
-      // prevent Vite from pre-bundling
-      const mod: any = await import(/* @vite-ignore */ fsrsPkg).catch(() => null)
-      if (mod && typeof mod.repeat === 'function') {
-        const res = await mod.repeat({ card, rating })
-        console.log('FSRS repeat result:', res)
-      } else {
-        console.log('ts-fsrs not available; skipping scheduling')
-      }
-    } catch (e) {
-      console.log('FSRS not available or error:', e)
-    }
-  }
-
-  // Card editor modal
-  const [editorOpen, setEditorOpen] = useState(false)
-  const [editorCard, setEditorCard] = useState<Card | null>(null)
-
-  function openEditor(card: Card) {
-    setEditorCard(card)
-    setEditorOpen(true)
-  }
-
-  async function onEditorSave(c: Card) {
-    await saveToDB(c)
-    setEditorOpen(false)
-    setEditorCard(null)
+  function startReview(deck: Deck) {
+    setActiveDeck(deck)
+    setView('review')
   }
 
   return (
-    <div className="p-6">
-      <h1 className="text-2xl mb-4">DocuCards — MVP scaffold</h1>
-      <div className="mb-4">
-        <input type="file" accept="application/pdf" onChange={onFile} />
-        <div className="mt-2">Status: {status}</div>
-        <div className="mt-3 flex items-center gap-3">
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={medMode} onChange={(e) => setMedMode(e.target.checked)} className="accent-blue-500" />
-            <span>Med Mode</span>
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input type="checkbox" checked={cloudFallback} onChange={(e) => setCloudFallback(e.target.checked)} className="accent-indigo-400" />
-            <span>Enable Cloud Fallback</span>
-          </label>
+    <div className="app">
+      <nav className="sidebar">
+        <div className="sidebar-logo">
+          <span className="logo-mark">⬡</span>
+          <span className="logo-text">MedCards</span>
         </div>
-
-        <div className="mt-3 p-3 bg-slate-800 rounded">
-          <div className="text-sm text-slate-300 mb-2">Encrypted cloud key (stored locally)</div>
-          <div className="flex gap-2">
-            <input placeholder="passphrase" type="password" value={keyPassphrase} onChange={(e) => setKeyPassphrase(e.target.value)} className="px-2 py-1 rounded bg-slate-700" />
-            <input placeholder="API key" value={apiKeyInput} onChange={(e) => setApiKeyInput(e.target.value)} className="px-2 py-1 rounded bg-slate-700" />
-            <button className="px-2 py-1 bg-green-600 rounded" onClick={saveCloudKey}>Save</button>
-            <button className="px-2 py-1 bg-blue-600 rounded" onClick={loadCloudKey}>Load</button>
-            <button className="px-2 py-1 bg-red-600 rounded" onClick={clearCloudKey}>Clear</button>
-          </div>
-          <div className="text-xs text-slate-400 mt-2">Stored: {storedApiKey ? 'exists' : 'none'}</div>
+        <div className="sidebar-nav">
+          <button className={`nav-item ${view === 'home' ? 'active' : ''}`} onClick={goHome}>
+            <span className="nav-icon">⊞</span>
+            <span>Decks</span>
+          </button>
+          <button className={`nav-item ${view === 'import' ? 'active' : ''}`} onClick={() => setView('import')}>
+            <span className="nav-icon">⊕</span>
+            <span>Import</span>
+          </button>
+          <button className={`nav-item ${view === 'chat' ? 'active' : ''}`} onClick={() => setView('chat')}>
+            <span className="nav-icon">⬡</span>
+            <span>Chat</span>
+          </button>
         </div>
-      </div>
-
-      {selectedFile && (
-        <div className="mb-4">
-          <div className="flex items-center gap-2 mb-2">
-            <button className="px-2 py-1 bg-red-600 rounded" onClick={() => setSelectedFile(null)}>Close viewer</button>
-            <div className="text-sm text-slate-400">Use the viewer to select rectangular regions on pages.</div>
-          </div>
-          <PDFPageViewer file={selectedFile} onRegionExtract={handleRegionExtract} />
+        <div className="sidebar-bottom">
+          <button className="nav-item" onClick={() => setSettingsOpen(true)}>
+            <span className="nav-icon">⚙</span>
+            <span>Settings</span>
+          </button>
         </div>
-      )}
+      </nav>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="bg-slate-800 p-4 rounded">
-          <h2 className="font-semibold">Generated cards</h2>
-          <ul>
-            {cards.map((c, i) => (
-              <li key={i} className="border-b border-slate-700 py-2">
-                <div className="text-sm text-slate-300">{c.front}</div>
-                <div className="text-xs text-slate-400">{c.back}</div>
-                <div className="mt-2">
-                  <button className="mr-2 px-2 py-1 bg-green-600 rounded" onClick={() => reviewCard(c, 5)}>Easy</button>
-                  <button className="mr-2 px-2 py-1 bg-yellow-600 rounded" onClick={() => reviewCard(c, 3)}>Good</button>
-                  <button className="mr-2 px-2 py-1 bg-blue-600 rounded" onClick={() => saveToDB(c)}>Save</button>
-                  <button className="mr-2 px-2 py-1 bg-indigo-700 text-white rounded" onClick={() => openEditor(c)}>Edit</button>
-                  <button className="px-2 py-1 bg-red-600 rounded" onClick={() => reviewCard(c, 0)}>Again</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </div>
+      <main className="main-content">
+        {view === 'home' && (
+          <DeckList onStudy={startReview} onAdd={() => setView('import')} refreshKey={deckRefreshKey} />
+        )}
+        {view === 'import' && (
+          <ImportFlow onDone={goHome} />
+        )}
+        {view === 'review' && activeDeck && (
+          <ReviewSession deckId={activeDeck.id!} deckName={activeDeck.name} onDone={goHome} />
+        )}
+        {view === 'chat' && (
+          <ChatPage apiKey={chatApiKey} />
+        )}
+      </main>
 
-        <div className="bg-slate-800 p-4 rounded">
-          <h2 className="font-semibold">Preview / Notes</h2>
-          <p className="text-sm text-slate-400">Upload a PDF to extract text; app will attempt PDF text extraction first and fall back to Tesseract OCR (eng+hin+kan).</p>
-
-          <div className="mt-4">
-            <h3 className="font-medium">Stored Cards</h3>
-            {storedCards.length === 0 && <div className="text-sm text-slate-500">No saved cards yet.</div>}
-            <ul>
-              {storedCards.map((c: any) => (
-                <li key={c.id} className="flex items-start justify-between border-b border-slate-700 py-2">
-                  <div>
-                    <div className="text-sm text-slate-300">{c.front}</div>
-                    <div className="text-xs text-slate-400">{c.back}</div>
-                  </div>
-                  <div className="pl-4">
-                    <button className="px-2 py-1 bg-red-600 rounded" onClick={() => removeFromDB(c.id)}>Delete</button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
-      </div>
+      {settingsOpen && <Settings onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }
