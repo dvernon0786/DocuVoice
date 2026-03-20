@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import PDFPageViewer from './PDFPageViewer'
 import PDFReadAloud from './PDFReadAloud'
@@ -8,6 +8,7 @@ import { addDeck, addCard, makeNewCard, updateDeckCounts } from '../lib/db'
 import type { Card } from '../lib/db'
 import { generateCards } from '../lib/pipeline'
 import { decryptFromLocalStorage } from '../lib/secureStorage'
+import { saveFile, loadFile, removeFile } from '../lib/fileStorage'
 
 type StagedCard = Omit<Card, 'id' | 'stability' | 'difficulty' | 'elapsedDays' | 'scheduledDays' | 'reps' | 'lapses' | 'state' | 'createdAt'>
  
@@ -43,7 +44,28 @@ export default function ImportFlow({ onDone }: Props) {
     setFile(f)
     setDeckName(f.name.replace(/\.pdf$/i, ''))
     setPhase('viewer')
+    // persist selected file so it survives a page reload
+    try { saveFile('import_last_file', f).catch(() => {}) } catch {}
   }
+
+  useEffect(() => {
+    // attempt to restore a previously uploaded file after refresh
+    let mounted = true
+    ;(async () => {
+      try {
+        const f = await loadFile('import_last_file')
+        if (!mounted) return
+        if (f) {
+          setFile(f)
+          setDeckName(f.name.replace(/\.pdf$/i, ''))
+          setPhase('viewer')
+        }
+      } catch (e) {
+        console.warn('restore file failed', e)
+      }
+    })()
+    return () => { mounted = false }
+  }, [])
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()
@@ -87,6 +109,7 @@ export default function ImportFlow({ onDone }: Props) {
     await updateDeckCounts(deckId)
     setSaving(false)
     onDone()
+    try { await removeFile('import_last_file') } catch {}
   }
 
   function removeCard(idx: number) {

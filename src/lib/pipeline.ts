@@ -29,6 +29,8 @@ export async function ocrPage(pdfDoc: any, pageNum: number): Promise<{ text: str
     canvas.height = Math.floor(viewport.height)
     const ctx = canvas.getContext('2d')!
     await page.render({ canvasContext: ctx, viewport }).promise
+    // skip OCR for extremely small rendered pages
+    if (canvas.width < 20 || canvas.height < 20) return { text: '', confidence: 0 }
     const result = await Tesseract.recognize(canvas as any, 'eng+hin+kan')
     const confidence = result.data.confidence ?? 0
     return { text: result.data.text || '', confidence }

@@ -67,10 +67,16 @@ export default function PDFPageViewer({ file, onRegionExtract }: { file: File | 
       canvas.width = Math.floor(viewport.width)
       canvas.height = Math.floor(viewport.height)
       const ctx = canvas.getContext('2d')!
-      await page.render({ canvasContext: ctx, viewport }).promise
+        // ensure a white background before PDF painting (helps visibility in dark themes)
+        ctx.fillStyle = '#ffffff'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        await page.render({ canvasContext: ctx, viewport }).promise
+        console.debug('Rendered PDF page', pageNum)
       // trigger OCR on this page (async)
       ;(async () => {
         try {
+          // skip OCR for extremely small canvases (avoids tesseract warnings)
+          if (canvas.width < 20 || canvas.height < 20) return
           const res = await Tesseract.recognize(canvas as any, 'eng+hin+kan')
           const words = (res.data.words || []).map((w: any) => ({ x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1, text: w.text }))
           setOcrResults((prev) => ({ ...prev, [pageNum]: words }))
@@ -94,6 +100,8 @@ export default function PDFPageViewer({ file, onRegionExtract }: { file: File | 
           const canvas = canvasRefs.current[idx]
           canvas!.style.maxWidth = '100%'
           canvas!.style.height = 'auto'
+            canvas!.style.display = 'block'
+            canvas!.style.background = 'white'
           wrapper.appendChild(canvas!)
         }
         // render/update content
@@ -142,6 +150,11 @@ export default function PDFPageViewer({ file, onRegionExtract }: { file: File | 
     selStartRef.current = null
     setSelection(null)
     if (w < 3 || h < 3) return
+    if (w < 20 || h < 20) {
+      // selection too small for OCR — avoid noisy tesseract warnings
+      onRegionExtract('', page)
+      return
+    }
     const canvas = canvasRefs.current[page]
     if (!canvas) return
     const tmp = document.createElement('canvas')
