@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import Tesseract from 'tesseract.js'
 import { addCard as dbAddCard, getAllCards as dbGetAllCards, deleteCard as dbDeleteCard } from './lib/db'
+import CardEditor from './components/CardEditor'
 
 export const CARD_SCHEMA = {
   front: 'string',
@@ -100,9 +101,14 @@ export default function App() {
     const generated: Card[] = []
     for (let i = 0; i < pages.length; i++) {
       const page = pages[i]
-      // naive chunking: split by ~500 chars
-      const chunks = []
-      for (let j = 0; j < page.length; j += 800) chunks.push(page.slice(j, j + 800))
+      // improved chunking: sliding window with overlap
+      const chunks: string[] = []
+      const chunkSize = 600
+      const overlap = 200
+      const step = Math.max(1, chunkSize - overlap)
+      for (let j = 0; j < page.length; j += step) {
+        chunks.push(page.slice(j, j + chunkSize))
+      }
       for (let k = 0; k < chunks.length; k++) {
         const out = await generateCardsForChunk(chunks[k], i + 1, k)
         generated.push(...out)
@@ -165,6 +171,21 @@ export default function App() {
     }
   }
 
+  // Card editor modal
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editorCard, setEditorCard] = useState<Card | null>(null)
+
+  function openEditor(card: Card) {
+    setEditorCard(card)
+    setEditorOpen(true)
+  }
+
+  async function onEditorSave(c: Card) {
+    await saveToDB(c)
+    setEditorOpen(false)
+    setEditorCard(null)
+  }
+
   return (
     <div className="p-6">
       <h1 className="text-2xl mb-4">DocuCards — MVP scaffold</h1>
@@ -184,6 +205,8 @@ export default function App() {
                 <div className="mt-2">
                   <button className="mr-2 px-2 py-1 bg-green-600 rounded" onClick={() => reviewCard(c, 5)}>Easy</button>
                   <button className="mr-2 px-2 py-1 bg-yellow-600 rounded" onClick={() => reviewCard(c, 3)}>Good</button>
+                  <button className="mr-2 px-2 py-1 bg-blue-600 rounded" onClick={() => saveToDB(c)}>Save</button>
+                  <button className="mr-2 px-2 py-1 bg-indigo-700 text-white rounded" onClick={() => openEditor(c)}>Edit</button>
                   <button className="px-2 py-1 bg-red-600 rounded" onClick={() => reviewCard(c, 0)}>Again</button>
                 </div>
               </li>
