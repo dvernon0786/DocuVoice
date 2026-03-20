@@ -92,8 +92,10 @@ async function generateViaWebLLM(
   medMode: boolean
 ): Promise<GeneratedCard[] | null> {
   try {
+    // Try a normal dynamic import; Vite is configured to treat this module as external
+    // so Rollup will not attempt to resolve it during the build.
     // @ts-ignore
-    const mod: any = await import(/* @vite-ignore */ '@mlc-ai/web-llm').catch(() => null)
+    const mod: any = await import('@mlc-ai/web-llm').catch(() => null)
     if (!mod) return null
     const engine = mod.CreateMLCEngine
       ? await mod.CreateMLCEngine('Phi-3.5-mini-instruct-q4f16_1-MLC', {

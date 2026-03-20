@@ -45,5 +45,12 @@ export default defineConfig(async () => {
     // plugin not installed — ignore
   }
 
-  return { plugins }
+  return {
+    plugins,
+    build: {
+      rollupOptions: {
+        external: ['@mlc-ai/web-llm']
+      }
+    }
+  }
 })
