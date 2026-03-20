@@ -15,7 +15,7 @@ type Model = {
 
 const MODELS: Model[] = [
   { id: 'x-ai/grok-3-beta',                              label: 'Grok 3',          sublabel: 'xAI · Best reasoning',        badge: '★' },
-  { id: 'x-ai/grok-3-mini-beta',                         label: 'Grok 3 Mini',     sublabel: 'xAI · Fast & cheap' },
+
   { id: 'anthropic/claude-sonnet-4-6',                   label: 'Claude Sonnet',   sublabel: 'Anthropic · Balanced' },
   { id: 'anthropic/claude-opus-4-6',                     label: 'Claude Opus',     sublabel: 'Anthropic · Most capable' },
   { id: 'google/gemini-2.0-flash',                       label: 'Gemini 2.0 Flash',sublabel: 'Google · Fast' },
