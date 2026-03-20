@@ -3,6 +3,7 @@ import * as pdfjsLib from 'pdfjs-dist'
 import Tesseract from 'tesseract.js'
 import { addCard as dbAddCard, getAllCards as dbGetAllCards, deleteCard as dbDeleteCard } from './lib/db'
 import CardEditor from './components/CardEditor'
+import PDFPageViewer from './components/PDFPageViewer'
 
 export const CARD_SCHEMA = {
   front: 'string',
@@ -97,24 +98,19 @@ export default function App() {
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
-    const pages = await processPDF(file)
-    const generated: Card[] = []
-    for (let i = 0; i < pages.length; i++) {
-      const page = pages[i]
-      // improved chunking: sliding window with overlap
-      const chunks: string[] = []
-      const chunkSize = 600
-      const overlap = 200
-      const step = Math.max(1, chunkSize - overlap)
-      for (let j = 0; j < page.length; j += step) {
-        chunks.push(page.slice(j, j + chunkSize))
-      }
-      for (let k = 0; k < chunks.length; k++) {
-        const out = await generateCardsForChunk(chunks[k], i + 1, k)
-        generated.push(...out)
-      }
-    }
-    setCards(generated)
+    // instead of auto-processing, show per-page viewer so user can select regions
+    setSelectedFile(file)
+  }
+
+  // selected file for per-page viewer
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+
+  async function handleRegionExtract(text: string, pageIndex: number) {
+    if (!text || !text.trim()) return
+    setStatus('generating')
+    // chunk the extracted region and create cards
+    const out = await generateCardsForChunk(text, pageIndex, 0)
+    setCards((prev) => [...prev, ...out])
     setStatus('done')
   }
 
@@ -193,6 +189,16 @@ export default function App() {
         <input type="file" accept="application/pdf" onChange={onFile} />
         <div className="mt-2">Status: {status}</div>
       </div>
+
+      {selectedFile && (
+        <div className="mb-4">
+          <div className="flex items-center gap-2 mb-2">
+            <button className="px-2 py-1 bg-red-600 rounded" onClick={() => setSelectedFile(null)}>Close viewer</button>
+            <div className="text-sm text-slate-400">Use the viewer to select rectangular regions on pages.</div>
+          </div>
+          <PDFPageViewer file={selectedFile} onRegionExtract={handleRegionExtract} />
+        </div>
+      )}
 
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-slate-800 p-4 rounded">
