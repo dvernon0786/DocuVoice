@@ -1,6 +1,7 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import * as pdfjsLib from 'pdfjs-dist'
 import Tesseract from 'tesseract.js'
+import { addCard as dbAddCard, getAllCards as dbGetAllCards, deleteCard as dbDeleteCard } from './lib/db'
 
 export const CARD_SCHEMA = {
   front: 'string',
@@ -111,6 +112,41 @@ export default function App() {
     setStatus('done')
   }
 
+  // Stored cards from IndexedDB
+  const [storedCards, setStoredCards] = useState<any[]>([])
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const all = await dbGetAllCards()
+        setStoredCards(all as any[])
+      } catch (e) {
+        // ignore
+      }
+    })()
+  }, [])
+
+  async function saveToDB(card: Card) {
+    try {
+      await dbAddCard(card)
+      const all = await dbGetAllCards()
+      setStoredCards(all as any[])
+      console.log('saved to db')
+    } catch (e) {
+      console.error('save error', e)
+    }
+  }
+
+  async function removeFromDB(id: number) {
+    try {
+      await dbDeleteCard(id)
+      const all = await dbGetAllCards()
+      setStoredCards(all as any[])
+    } catch (e) {
+      console.error('delete error', e)
+    }
+  }
+
   async function reviewCard(card: Card, rating: number) {
     // Use ts-fsrs to repeat/update schedule
     try {
@@ -158,6 +194,24 @@ export default function App() {
         <div className="bg-slate-800 p-4 rounded">
           <h2 className="font-semibold">Preview / Notes</h2>
           <p className="text-sm text-slate-400">Upload a PDF to extract text; app will attempt PDF text extraction first and fall back to Tesseract OCR (eng+hin+kan).</p>
+
+          <div className="mt-4">
+            <h3 className="font-medium">Stored Cards</h3>
+            {storedCards.length === 0 && <div className="text-sm text-slate-500">No saved cards yet.</div>}
+            <ul>
+              {storedCards.map((c: any) => (
+                <li key={c.id} className="flex items-start justify-between border-b border-slate-700 py-2">
+                  <div>
+                    <div className="text-sm text-slate-300">{c.front}</div>
+                    <div className="text-xs text-slate-400">{c.back}</div>
+                  </div>
+                  <div className="pl-4">
+                    <button className="px-2 py-1 bg-red-600 rounded" onClick={() => removeFromDB(c.id)}>Delete</button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       </div>
     </div>
