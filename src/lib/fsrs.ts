@@ -2,7 +2,7 @@
 // Based on the open-source FSRS algorithm by Jarrett Ye
 // https://github.com/open-spaced-repetition/fsrs4anki
 
-import type { Card, FSRSState } from './docucards-db'
+import type { Card } from './db'
 
 export type Rating = 1 | 2 | 3 | 4  // Again, Hard, Good, Easy
 
@@ -159,4 +159,3 @@ export function intervalLabel(days: number): string {
   if (days < 365) return `${Math.round(days / 30)}mo`
   return `${(days / 365).toFixed(1)}yr`
 }
-

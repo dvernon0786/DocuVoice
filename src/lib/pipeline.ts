@@ -92,17 +92,21 @@ async function generateViaWebLLM(
   medMode: boolean
 ): Promise<GeneratedCard[] | null> {
   try {
-    // Try a normal dynamic import; Vite is configured to treat this module as external
-    // so Rollup will not attempt to resolve it during the build.
+    // @mlc-ai/web-llm is declared external in vite.config — loaded at runtime via CDN/cache
+    // If not available (no WebGPU, not cached), returns null gracefully
     // @ts-ignore
-    const mod: any = await import('@mlc-ai/web-llm').catch(() => null)
+    const mod = typeof window !== 'undefined' && (window as any).__webllm__
+      ? { default: (window as any).__webllm__ }
+      : null
     if (!mod) return null
-    const engine = mod.CreateMLCEngine
-      ? await mod.CreateMLCEngine('Phi-3.5-mini-instruct-q4f16_1-MLC', {
+
+    const engine = mod.default?.CreateMLCEngine
+      ? await mod.default.CreateMLCEngine('Phi-3.5-mini-instruct-q4f16_1-MLC', {
           initProgressCallback: () => {},
         })
       : null
     if (!engine) return null
+
     const prompt = medMode ? MED_PROMPT(chunk) : GENERAL_PROMPT(chunk)
     const reply = await engine.chat.completions.create({
       messages: [{ role: 'user', content: prompt }],
@@ -233,4 +237,3 @@ export async function runPipeline(pdfDoc: any, opts: PipelineOptions): Promise<v
 
   onProgress('Done', 100)
 }
-
