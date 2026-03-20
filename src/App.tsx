@@ -1,14 +1,11 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState } from 'react'
 import DeckList from './components/DeckList'
 import ImportFlow from './components/ImportFlow'
 import ReviewSession from './components/ReviewSession'
 import Settings from './components/Settings'
 import ChatPage from './components/ChatPage'
-// Minimal Deck type used by this UI
-type Deck = { id?: number; name: string }
-import { decryptFromLocalStorage } from './lib/secureStorage'
+import type { Deck } from './lib/db'
 
-// Set pdf.js worker
 import * as pdfjsLib from 'pdfjs-dist'
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`
 
@@ -19,26 +16,8 @@ export default function App() {
   const [activeDeck, setActiveDeck] = useState<Deck | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [deckRefreshKey, setDeckRefreshKey] = useState(0)
-  const [chatApiKey, setChatApiKey] = useState<string | null>(null)
-
-  // Try to pre-load API key if cloud is enabled (no passphrase = deferred to chat page)
-  const cloudEnabled = localStorage.getItem('cloudFallback') === '1'
-
-  useEffect(() => {
-    let mounted = true
-    async function preloadKey() {
-      if (!cloudEnabled) return
-      try {
-        // decryptFromLocalStorage requires a passphrase; empty string will return null if key is encrypted
-        const key = await decryptFromLocalStorage('chatApiKey', '')
-        if (mounted && key) setChatApiKey(key)
-      } catch (err) {
-        // ignore — ChatPage will handle prompting for key/passphrase if needed
-      }
-    }
-    preloadKey()
-    return () => { mounted = false }
-  }, [cloudEnabled])
+  // null on start — ChatPage handles its own unlock flow
+  const [chatApiKey] = useState<string | null>(null)
 
   function goHome() {
     setView('home')
@@ -68,7 +47,7 @@ export default function App() {
             <span>Import</span>
           </button>
           <button className={`nav-item ${view === 'chat' ? 'active' : ''}`} onClick={() => setView('chat')}>
-            <span className="nav-icon">⬡</span>
+            <span className="nav-icon">💬</span>
             <span>Chat</span>
           </button>
         </div>
