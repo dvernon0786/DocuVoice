@@ -57,9 +57,17 @@ class TTSEngine {
 
   async loadPiper(voiceId: string): Promise<boolean> {
     try {
-      // Try to dynamically import piper-tts-web
+      // Try to dynamically import piper-tts-web at runtime without static analysis
+      // so the bundler doesn't try to resolve it during build.
       // @ts-ignore
-      const mod = await import(/* @vite-ignore */ 'piper-tts-web').catch(() => null)
+      let mod: any = null
+      try {
+        // Use Function wrapper to avoid static import detection by bundlers
+        // eslint-disable-next-line no-new-func
+        mod = await (new Function('return import("piper-tts-web")'))().catch(() => null)
+      } catch {
+        mod = null
+      }
       if (!mod) return false
 
       this.setState('loading')
