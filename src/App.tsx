@@ -22,6 +22,11 @@ type Card = {
 export default function App() {
   const [cards, setCards] = useState<Card[]>([])
   const [status, setStatus] = useState<string>('idle')
+  const [medMode, setMedMode] = useState<boolean>(() => {
+    try { return localStorage.getItem('medMode') === '1' } catch { return false }
+  })
+
+  useEffect(() => { try { localStorage.setItem('medMode', medMode ? '1' : '0') } catch {} }, [medMode])
 
   async function processPDF(file: File) {
     setStatus('processing')
@@ -62,7 +67,9 @@ export default function App() {
       const WebLLM = WebLLMMod?.WebLLM
       // @ts-ignore (simplified usage — replace with actual WebLLM init & call)
       const model = await WebLLM?.load?.()
-      const prompt = `Extract 3 concise flashcards from the following text. Return JSON array of {front, back, tags}:\n\n${chunk}`
+        const prompt = medMode
+          ? `You are a top medical tutor for NEET-PG / USMLE. From this exact textbook/lecture chunk only, generate 4 high-yield flashcards. Return strict JSON array of objects with keys {front, back, tags}. Prioritize: one fact per card, cloze deletions for lists/tables, clinical vignettes, mechanisms, differentials, and common drug side-effects. Tags should include specialties when relevant (e.g. "pharmacology","cardiology","anatomy","high-yield"). Text: """${chunk}"""`
+          : `Extract 3 concise flashcards from the following text. Return JSON array of {front, back, tags}:\n\n${chunk}`
       // @ts-ignore
       const result = await model?.generate?.(prompt)
       if (result) {
@@ -86,10 +93,11 @@ export default function App() {
 
     // Simple heuristic fallback: split into sentences and make Q/A
     const sentences = chunk.split(/(?<=[.?!])\s+/).filter(Boolean)
-    const sample = sentences.slice(0, 3).map((s, i) => ({
-      front: s.slice(0, 80) + (s.length > 80 ? '...' : ''),
+    const take = medMode ? 4 : 3
+    const sample = sentences.slice(0, take).map((s, i) => ({
+      front: medMode ? `Cloze: ${s.slice(0, Math.min(60, s.length))}${s.length>60?'...':''}` : s.slice(0, 80) + (s.length > 80 ? '...' : ''),
       back: s,
-      tags: [],
+      tags: medMode ? ['medical','high-yield'] : [],
       meta: { sourcePage: page, chunkIndex: idx }
     }))
     return sample
